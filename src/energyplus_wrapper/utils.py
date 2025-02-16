@@ -1,12 +1,11 @@
 import warnings
-from typing import Generator, Tuple
+from typing import Generator
 import re
 
 import bs4
 import pandas as pd
-from pandas import DataFrame
-from path import Path
-from box import Box, BoxList
+from pathlib import Path
+from box import Box
 from slugify import slugify
 
 re_section = re.compile(r"Report:(.*)", re.DOTALL)
@@ -16,7 +15,7 @@ re_timestamp = re.compile(r"Timestamp:(.*)", re.DOTALL)
 
 def _eplus_html_report_gen(
     eplus_html_report: Path,
-) -> Generator[Tuple[str, DataFrame], None, None]:
+) -> Generator:
     """Extract the EnergyPlus html report into dataframes.
 
     Arguments:
@@ -37,12 +36,13 @@ def _eplus_html_report_gen(
         except AttributeError:
             for_ = None
         title = table.find_previous_sibling("b").get_text()
-        yield ((section, for_), title), pd.read_html(str(table), index_col=0, header=0)[
-            0
-        ].dropna(how="all")
+        yield (
+            ((section, for_), title),
+            pd.read_html(str(table), index_col=0, header=0)[0].dropna(how="all"),
+        )
 
 
-def process_eplus_html_report(eplus_html_report: Path):
+def process_eplus_html_report(eplus_html_report: Path) -> Box:
     """Extract the EnergyPlus html report into dataframes.
 
     Arguments:
@@ -61,9 +61,7 @@ def process_eplus_html_report(eplus_html_report: Path):
     return reports
 
 
-def process_eplus_time_series(
-    working_dir,
-) -> Generator[Tuple[str, DataFrame], None, None]:
+def process_eplus_time_series(working_dir) -> dict:
     """Extract the EnergyPlus csv outputs into dataframes.
 
     Arguments:

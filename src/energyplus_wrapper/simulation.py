@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 # coding=utf-8
 
+from os import unlink
+import shutil
 from typing import Callable
 
-import attr
 import plumbum
-from path import Path
+from pathlib import Path
 from plumbum import ProcessExecutionError
 
 from .utils import process_eplus_html_report, process_eplus_time_series
@@ -21,7 +22,6 @@ def parse_generated_files_as_df(simulation):
     simulation.time_series = process_eplus_time_series(simulation.working_dir)
 
 
-@attr.s
 class Simulation:
     """Object that contains all that is needed to run an EnergyPlus simulation.
 
@@ -40,24 +40,27 @@ class Simulation:
         time_series (dict): if finished, contains the EPlus time series results.
     """
 
-    name = attr.ib(type=str)
-    eplus_bin = attr.ib(type=str, converter=Path)
-    idf_file = attr.ib(type=str, converter=Path)
-    epw_file = attr.ib(type=str, converter=Path)
-    idd_file = attr.ib(type=str, converter=Path)
-
-    working_dir = attr.ib(type=str, converter=Path)
-
-    post_process = attr.ib(
-        type=Callable,
-        default=parse_generated_files_as_df,
-        converter=lambda x: x if x is not None else parse_generated_files_as_df,
-    )
-
-    status = attr.ib(type=str, default="pending")
-    _log = attr.ib(type=str, default="", init=False, repr=False)
-    reports = attr.ib(type=dict, default=None, repr=False)
-    time_series = attr.ib(type=dict, default=None, repr=False)
+    def __init__(
+        self,
+        name: str,
+        eplus_bin: str | Path,
+        idf_file: str | Path,
+        epw_file: str | Path,
+        idd_file: str | Path,
+        working_dir: str | Path,
+        post_process: Callable | None = parse_generated_files_as_df,
+    ):
+        self.name = name
+        self.eplus_bin = Path(eplus_bin)
+        self.idf_file = Path(idf_file)
+        self.epw_file = Path(epw_file)
+        self.idd_file = Path(idd_file)
+        self.working_dir = Path(working_dir)
+        self.post_process = post_process
+        self.status = "pending"
+        self._log = ""
+        self.reports = None
+        self.time_series = None
 
     @property
     def log(self):
@@ -79,19 +82,17 @@ class Simulation:
 
     @property
     def eplus_base_exec(self):
-        """give access to the EnergyPlus executable via plumbum
-        """
-        return plumbum.local[self.eplus_bin]
+        """give access to the EnergyPlus executable via plumbum"""
+        return plumbum.local[str(self.eplus_bin)]
 
     @property
     def eplus_cmd(self):
         """return a pre-configured eplus executable that only need the weather
         file and the idf to be ran.
         """
-        return (
-            self.eplus_base_exec["-s", "d", "-r", "-x", "-i", self.idd_file, "-w"]
-            > self.log_file
-        )
+        return self.eplus_base_exec[
+            "-s", "d", "-r", "-x", "-i", str(self.idd_file), "-w"
+        ] > str(self.log_file)
 
     def run(self):
         """Run the EPlus simulation
@@ -103,7 +104,7 @@ class Simulation:
         self.status = "running"
         try:
             self.status = "running"
-            self._log = self.eplus_cmd[self.epw_file, self.idf_file]()
+            self._log = self.eplus_cmd[str(self.epw_file), str(self.idf_file)]()
             self.status = "finished"
         except ProcessExecutionError:
             self.status = "failed"
@@ -111,7 +112,8 @@ class Simulation:
         except KeyboardInterrupt:
             self.status = "interrupted"
             raise
-        self.post_process(self)
+        if self.post_process is not None:
+            self.post_process(self)
         return self.reports
 
     def backup(self, backup_dir: Path):
@@ -125,8 +127,8 @@ class Simulation:
         Returns:
             Path -- the exact folder where the data are saved.
         """
-        (backup_dir / f"{self.status}_{self.name}").rmtree_p()
-        backup_dir = Path(backup_dir).mkdir_p()
+        unlink(backup_dir / f"{self.status}_{self.name}")
+        Path(backup_dir).mkdir(exist_ok=True, parents=True)
         saved_data = backup_dir / f"{self.status}_{self.name}"
-        self.working_dir.copytree(saved_data)
+        shutil.copytree(self.working_dir, saved_data)
         return saved_data

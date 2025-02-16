@@ -1,0 +1,29 @@
+[project]
+name = "energyplus-wrapper"
+version = "2.0.0rc1"
+description = "A wrapper for EnergyPlus"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "platformdirs>=4.3.6",
+    "pandas>=2.2.3",
+    "loguru>=0.7.3",
+    "plumbum>=1.9.0",
+    "joblib>=1.4.2",
+    "eppy>=0.5.63",
+    "coolname>=2.2.0",
+    "python-box>=7.3.2",
+    "python-slugify>=8.0.4",
+    "fasteners>=0.19",
+    "pexpect>=4.9.0",
+    "requests>=2.32.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.4",
+]

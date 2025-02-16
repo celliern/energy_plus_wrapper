@@ -1,19 +1,22 @@
 #!/usr/bin/env python
 # coding=utf-8
 
+import contextlib
+import os
+import shutil
 import re
-from typing import Callable, Dict, Mapping, Optional, Tuple, Union, Sequence
+from typing import Callable, Literal, Mapping, Sequence
 from warnings import warn
-from tempfile import gettempdir
+from tempfile import gettempdir, TemporaryDirectory
+from pathlib import Path
 
-import attr
 import plumbum
 from coolname import generate_slug
 from eppy.modeleditor import IDF as eppy_IDF
 from joblib import Parallel, delayed
-from path import Path, TempDir
 from plumbum import ProcessExecutionError
 from loguru import logger
+
 
 from .simulation import Simulation
 
@@ -21,8 +24,20 @@ eplus_version_pattern = re.compile(r"EnergyPlus, Version (\d\.\d)")
 idf_version_pattern = re.compile(r"EnergyPlus Version (\d\.\d)")
 idd_version_pattern = re.compile(r"IDD_Version (\d\.\d)")
 
+IDF_TYPE = Path | eppy_IDF | str
 
-@attr.s
+
+@contextlib.contextmanager
+def working_directory(path):
+    """Changes working directory and returns to previous on exit."""
+    prev_cwd = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(prev_cwd)
+
+
 class EPlusRunner:
     """Object that contains all that is needed to run an EnergyPlus simulation.
 
@@ -33,8 +48,13 @@ class EPlusRunner:
             by EnergyPlus.
     """
 
-    energy_plus_root = attr.ib(type=str, converter=lambda file: Path(file).abspath())
-    temp_dir = attr.ib(type=str, factory=gettempdir)
+    def __init__(
+        self,
+        energy_plus_root: str | Path,
+        temp_dir: str | Path | None = None,
+    ):
+        self.energy_plus_root = Path(energy_plus_root).absolute()
+        self.temp_dir = Path(temp_dir) if temp_dir else Path(gettempdir())
 
     def get_idf_version(self, idf_file: Path) -> str:
         """extract the eplus version affiliated with the idf file.
@@ -51,7 +71,7 @@ class EPlusRunner:
                 version = idf_version_pattern.findall(idf_str)[0]
             except IndexError:
                 version = False
-        return version
+        return str(version)
 
     @property
     def idd_version(self) -> str:
@@ -66,7 +86,7 @@ class EPlusRunner:
                 version = idd_version_pattern.findall(idd_str)[0]
             except IndexError:
                 version = False
-        return version
+        return str(version)
 
     @property
     def eplus_version(self) -> str:
@@ -75,7 +95,9 @@ class EPlusRunner:
         Returns:
             str -- the version as "{major}.{minor}" (e.g. "8.7")
         """
-        version = eplus_version_pattern.findall(plumbum.local[self.eplus_bin]("-v"))[0]
+        version = eplus_version_pattern.findall(
+            plumbum.local[str(self.eplus_bin)]("-v")
+        )[0]
         return version
 
     @property
@@ -135,14 +157,14 @@ class EPlusRunner:
 
     def run_one(
         self,
-        idf: Union[Path, eppy_IDF, str],
-        epw_file: Path,
-        backup_strategy: str = "on_error",
-        backup_dir: Path = "./backup",
-        simulation_name: Optional[str] = None,
-        custom_process: Optional[Callable[[Simulation], None]] = None,
+        idf: IDF_TYPE,
+        epw_file: Path | str,
+        backup_strategy: Literal["on_error", "always"] | None = "on_error",
+        backup_dir: Path = Path("./backup"),
+        simulation_name: str | None = None,
+        custom_process: Callable[[Simulation], None] | None = None,
         version_mismatch_action: str = "raise",
-        extra_files: Optional[Sequence[str]] = None,
+        extra_files: Sequence[str] | None = None,
     ) -> Simulation:
         """Run an EnergyPlus simulation with the provided idf and weather file.
 
@@ -174,6 +196,8 @@ class EPlusRunner:
         if simulation_name is None:
             simulation_name = generate_slug()
 
+        epw_file = Path(epw_file)
+
         if backup_strategy not in ["on_error", "always", None]:
             raise ValueError(
                 "`backup_strategy` argument should be either 'on_error', 'always'"
@@ -181,27 +205,27 @@ class EPlusRunner:
             )
         backup_dir = Path(backup_dir)
 
-        with TempDir(prefix="energyplus_run_", dir=self.temp_dir) as td:
+        with TemporaryDirectory(prefix="energyplus_run_", dir=self.temp_dir) as td:
+            td = Path(td)
             if extra_files is not None:
                 for extra_file in extra_files:
-                    Path(extra_file).copy(td)
+                    shutil.copy(extra_file, td)
             if isinstance(idf, eppy_IDF):
                 idf = idf.idfstr()
                 idf_file = td / "eppy_idf.idf"
-                with open(idf_file, "w") as idf_descriptor:
-                    idf_descriptor.write(idf)
+                idf_file.write_text(idf)
             else:
                 idf_file = idf
                 if version_mismatch_action in ["raise", "warn"]:
                     self.check_version_compat(
                         idf_file, version_mismatch_action=version_mismatch_action
                     )
-            idf_file, epw_file = (Path(f).abspath() for f in (idf_file, epw_file))
-            with td:
+            idf_file, epw_file = (Path(f).absolute() for f in (idf_file, epw_file))
+            with working_directory(td):
                 logger.debug((idf_file, epw_file, td))
-                if idf_file not in td.files():
-                    idf_file.copy(td)
-                epw_file.copy(td)
+                if idf_file not in td.glob("*"):
+                    shutil.copy(idf_file, td)
+                shutil.copy(epw_file, td)
                 sim = Simulation(
                     simulation_name,
                     self.eplus_bin,
@@ -225,13 +249,13 @@ class EPlusRunner:
 
     def run_many(
         self,
-        samples: Mapping[str, Tuple[Union[Path, eppy_IDF, str], Path]],
-        epw_file: Optional[Path] = None,
-        backup_strategy: str = "on_error",
-        backup_dir: Path = "./backup",
-        custom_process: Optional[Callable[[Simulation], None]] = None,
+        samples: Mapping[str, tuple[IDF_TYPE, Path | str] | IDF_TYPE],
+        epw_file: Path | str | None = None,
+        backup_strategy: Literal["on_error", "always"] | None = "on_error",
+        backup_dir: Path | str | None = Path("./backup"),
+        custom_process: Callable[[Simulation], None] | None = None,
         version_mismatch_action: str = "raise",
-    ) -> Dict[str, Simulation]:
+    ) -> dict[str, Simulation]:
         """Run multiple EnergyPlus simulation.
 
         Arguments:
@@ -255,14 +279,18 @@ class EPlusRunner:
             Dict[str, Simulation] -- the results put in a dictionnary with the same
                 keys as the samples.
         """
-        if epw_file and any(
-            [not isinstance(value, (Path, str, eppy_IDF)) for value in samples.values()]
-        ):
-            raise ValueError(
-                "If epw_file is not None, samples should be a dict as {sim_name: idf}."
-            )
-        if epw_file:
-            samples = {key: (idf, epw_file) for key, idf in samples.items()}
+
+        samples_: dict[str, tuple[IDF_TYPE, Path | str]] = {}
+        for key, value in samples.items():
+            if isinstance(value, (tuple, list)) and epw_file is None:
+                samples_[key] = value
+            elif isinstance(value, IDF_TYPE) and epw_file is not None:
+                samples_[key] = (value, Path(epw_file))
+            else:
+                raise ValueError(
+                    "Either all the samples should be a tuple (idf, epw) and not epw file is given or "
+                    "all the samples should be an idf file and an epw file should be given."
+                )
         sims = Parallel()(
             delayed(self.run_one)(
                 idf,
@@ -273,6 +301,14 @@ class EPlusRunner:
                 custom_process=custom_process,
                 version_mismatch_action=version_mismatch_action,
             )
-            for key, (idf, epw_file) in samples.items()
+            for key, (idf, epw_file) in samples_.items()
         )
-        return {key: sim for key, sim in zip(samples.keys(), sims)}
+        return {
+            key: raise_or_return_sim(sim) for key, sim in zip(samples_.keys(), sims)
+        }
+
+
+def raise_or_return_sim(value) -> Simulation:
+    if not isinstance(value, Simulation):
+        raise TypeError("The function should return a Simulation object.")
+    return value
