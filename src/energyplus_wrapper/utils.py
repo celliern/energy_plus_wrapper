@@ -61,7 +61,7 @@ def process_eplus_html_report(eplus_html_report: Path) -> Box:
     return reports
 
 
-def process_eplus_time_series(working_dir) -> dict:
+def process_eplus_time_series(working_dir: Path) -> dict[str, pd.DataFrame]:
     """Extract the EnergyPlus csv outputs into dataframes.
 
     Arguments:
@@ -71,8 +71,8 @@ def process_eplus_time_series(working_dir) -> dict:
         Tuple[str, DataFrame] -- tuple of (csv_name, csv_data)
     """
     time_series = {}
-    for csv_file in working_dir.files("*.csv"):
-        name = csv_file.basename().stripext()
+    for csv_file in working_dir.glob("*.csv"):
+        name = csv_file.stem
         if name != "eplus":
             name = name.replace("eplus-", "")
         try:

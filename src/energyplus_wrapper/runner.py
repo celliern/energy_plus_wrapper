@@ -52,9 +52,13 @@ class EPlusRunner:
         self,
         energy_plus_root: str | Path,
         temp_dir: str | Path | None = None,
+        mode: Literal["cli", "api"] = "cli",
     ):
         self.energy_plus_root = Path(energy_plus_root).absolute()
         self.temp_dir = Path(temp_dir) if temp_dir else Path(gettempdir())
+        if mode not in ["cli", "api"]:
+            raise ValueError("`mode` argument should be either 'cli' or 'api'.")
+        self.mode = mode
 
     def get_idf_version(self, idf_file: Path) -> str:
         """extract the eplus version affiliated with the idf file.
@@ -203,7 +207,7 @@ class EPlusRunner:
                 "`backup_strategy` argument should be either 'on_error', 'always'"
                 " or None."
             )
-        backup_dir = Path(backup_dir)
+        backup_dir = Path(backup_dir).absolute()
 
         with TemporaryDirectory(prefix="energyplus_run_", dir=self.temp_dir) as td:
             td = Path(td)
@@ -234,15 +238,18 @@ class EPlusRunner:
                     self.idd_file,
                     working_dir=td,
                     post_process=custom_process,
+                    mode=self.mode,
                 )
                 try:
                     sim.run()
-                except (ProcessExecutionError, KeyboardInterrupt):
+                except (ProcessExecutionError, RuntimeError, KeyboardInterrupt):
                     if backup_strategy == "on_error":
+                        logger.info("Backup the simulation (strategy: on_error).")
                         sim.backup(backup_dir)
                     raise
                 finally:
                     if backup_strategy == "always":
+                        logger.info("Backup the simulation (strategy: always).")
                         sim.backup(backup_dir)
 
         return sim

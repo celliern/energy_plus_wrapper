@@ -17,6 +17,7 @@ dependencies = [
     "fasteners>=0.19",
     "pexpect>=4.9.0",
     "requests>=2.32.3",
+    "beautifulsoup4<=4.8.0",
 ]
 
 [build-system]
@@ -27,3 +28,4 @@ build-backend = "hatchling.build"
 dev-dependencies = [
     "pytest>=8.3.4",
 ]
+
