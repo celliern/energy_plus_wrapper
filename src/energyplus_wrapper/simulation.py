@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 
+from contextlib import contextmanager
 from os import unlink
 import shutil
 from typing import Any, Callable, Literal
@@ -20,6 +21,25 @@ def parse_generated_files_as_df(simulation):
     except FileNotFoundError:
         pass
     simulation.time_series = process_eplus_time_series(simulation.working_dir)
+
+
+@contextmanager
+def eplus_api():
+    try:
+        import pyenergyplus.api
+    except ImportError:
+        raise ImportError(
+            "Unable to find pyenergyplus. "
+            "You may need to add the energyplus root folder to your PYTHONPATH with "
+            "`export PYTHONPATH=$PYTHONPATH:/path/to/energyplus` in your shell "
+            "or `sys.path.append('/path/to/energyplus')` in your script."
+        )
+    eplus_api = pyenergyplus.api.EnergyPlusAPI()
+    state_manager = pyenergyplus.api.StateManager(eplus_api.api)
+    eplus_runtime = pyenergyplus.api.Runtime(eplus_api.api)
+    state = state_manager.new_state()
+    yield state, eplus_runtime
+    state_manager.delete_state(state)
 
 
 class Simulation:
@@ -107,25 +127,21 @@ class Simulation:
             )
         self.status = "running"
         try:
-            eplus_api = pyenergyplus.api.EnergyPlusAPI()
-            state_manager = pyenergyplus.api.StateManager(eplus_api.api)
-            eplus_runtime = pyenergyplus.api.Runtime(eplus_api.api)
-
-            eplus_state = state_manager.new_state()
-            return_status = eplus_runtime.run_energyplus(
-                eplus_state,
-                command_line_args=[
-                    "-s",
-                    "d",
-                    "-r",
-                    "-x",
-                    "-i",
-                    str(self.idd_file),
-                    "-w",
-                    str(self.epw_file),
-                    str(self.idf_file),
-                ],
-            )
+            with eplus_api() as (eplus_state, eplus_runtime):
+                return_status = eplus_runtime.run_energyplus(
+                    eplus_state,
+                    command_line_args=[
+                        "-s",
+                        "d",
+                        "-r",
+                        "-x",
+                        "-i",
+                        str(self.idd_file),
+                        "-w",
+                        str(self.epw_file),
+                        str(self.idf_file),
+                    ],
+                )
             self._log = (self.working_dir / "eplus.err").read_text()
             if return_status != 0:
                 raise RuntimeError("EnergyPlus exited with non-zero status code")

@@ -5,7 +5,7 @@ import contextlib
 import os
 import shutil
 import re
-from typing import Callable, Literal, Mapping, Sequence
+from typing import Callable, Hashable, Literal, Mapping, Sequence, TypeVar
 from warnings import warn
 from tempfile import gettempdir, TemporaryDirectory
 from pathlib import Path
@@ -25,6 +25,7 @@ idf_version_pattern = re.compile(r"EnergyPlus Version (\d\.\d)")
 idd_version_pattern = re.compile(r"IDD_Version (\d\.\d)")
 
 IDF_TYPE = Path | eppy_IDF | str
+AnyHashable = TypeVar("AnyHashable", bound=Hashable)
 
 
 @contextlib.contextmanager
@@ -225,6 +226,7 @@ class EPlusRunner:
                         idf_file, version_mismatch_action=version_mismatch_action
                     )
             idf_file, epw_file = (Path(f).absolute() for f in (idf_file, epw_file))
+
             with working_directory(td):
                 logger.debug((idf_file, epw_file, td))
                 if idf_file not in td.glob("*"):
@@ -238,7 +240,7 @@ class EPlusRunner:
                     self.idd_file,
                     working_dir=td,
                     post_process=custom_process,
-                    mode=self.mode,
+                    mode=self.mode,  # type: ignore
                 )
                 try:
                     sim.run()
@@ -256,13 +258,13 @@ class EPlusRunner:
 
     def run_many(
         self,
-        samples: Mapping[str, tuple[IDF_TYPE, Path | str] | IDF_TYPE],
+        samples: Mapping[AnyHashable, tuple[IDF_TYPE, Path | str] | IDF_TYPE],
         epw_file: Path | str | None = None,
         backup_strategy: Literal["on_error", "always"] | None = "on_error",
         backup_dir: Path | str | None = Path("./backup"),
         custom_process: Callable[[Simulation], None] | None = None,
         version_mismatch_action: str = "raise",
-    ) -> dict[str, Simulation]:
+    ) -> dict[AnyHashable, Simulation]:
         """Run multiple EnergyPlus simulation.
 
         Arguments:
@@ -287,7 +289,7 @@ class EPlusRunner:
                 keys as the samples.
         """
 
-        samples_: dict[str, tuple[IDF_TYPE, Path | str]] = {}
+        samples_: dict[AnyHashable, tuple[IDF_TYPE, Path | str]] = {}
         for key, value in samples.items():
             if isinstance(value, (tuple, list)) and epw_file is None:
                 samples_[key] = value
