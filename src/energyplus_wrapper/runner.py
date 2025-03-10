@@ -9,6 +9,7 @@ from typing import Callable, Hashable, Literal, Mapping, Sequence, TypeVar
 from warnings import warn
 from tempfile import gettempdir, TemporaryDirectory
 from pathlib import Path
+from charset_normalizer import detect
 
 import plumbum
 from coolname import generate_slug
@@ -170,6 +171,7 @@ class EPlusRunner:
         custom_process: Callable[[Simulation], None] | None = None,
         version_mismatch_action: str = "raise",
         extra_files: Sequence[str] | None = None,
+        encoding: str = "utf8",
     ) -> Simulation:
         """Run an EnergyPlus simulation with the provided idf and weather file.
 
@@ -218,7 +220,7 @@ class EPlusRunner:
             if isinstance(idf, eppy_IDF):
                 idf = idf.idfstr()
                 idf_file = td / "eppy_idf.idf"
-                idf_file.write_text(idf)
+                idf_file.write_text(idf, encoding=encoding)
             else:
                 idf_file = idf
                 if version_mismatch_action in ["raise", "warn"]:
