@@ -167,7 +167,7 @@ class EPlusRunner:
         epw_file: Path | str,
         backup_strategy: Literal["on_error", "always"] | None = "on_error",
         backup_dir: Path = Path("./backup"),
-        simulation_name: str | None = None,
+        simulation_name: Hashable | None = None,
         custom_process: Callable[[Simulation], None] | None = None,
         version_mismatch_action: str = "raise",
         extra_files: Sequence[str] | None = None,

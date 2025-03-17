@@ -4,7 +4,7 @@
 from contextlib import contextmanager
 from os import unlink
 import shutil
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Hashable, Literal
 
 import plumbum
 from pathlib import Path
@@ -62,7 +62,7 @@ class Simulation:
 
     def __init__(
         self,
-        name: str,
+        name: Hashable,
         eplus_bin: str | Path,
         idf_file: str | Path,
         epw_file: str | Path,
